@@ -6,6 +6,8 @@
  * Licensed jointly under the GPL and MIT licenses,
  * choose which one suits your project best!
  *
+ * Modified heavily by marick@change.org
+ *
  */
 
 (function ($) {
@@ -55,6 +57,11 @@ var DEFAULT_SETTINGS = {
     // Behavioral settings
     allowFreeTagging: false,
     allowTabOut: false,
+    selectFirstResultAfterSearch: true,
+    allowSelectTokens: true,
+    applySelectedValueToInputQuery: false,
+    scrollOffDropDown: false,
+    dropDownUnderToken: false,
 
     // Callbacks
     onResult: null,
@@ -124,6 +131,8 @@ var HTML_ESCAPES = {
 };
 
 var HTML_ESCAPE_CHARS = /[&<>"'\/]/g;
+
+var last_query = "";
 
 function coerceToString(val) {
   return String((val === null || val === undefined) ? '' : val);
@@ -252,13 +261,10 @@ $.TokenList = function (input, url_or_data, settings) {
         })
         .blur(function () {
             hide_dropdown();
-            $(this).val("");
-            token_list.removeClass($(input).data("settings").classes.focused);
-
             if ($(input).data("settings").allowFreeTagging) {
-              add_freetagging_tokens();
+                add_freetagging_tokens();
             } else {
-              $(this).val("");
+                $(this).val("");
             }
             token_list.removeClass($(input).data("settings").classes.focused);
         })
@@ -294,13 +300,29 @@ $.TokenList = function (input, url_or_data, settings) {
                         var dropdown_item = null;
 
                         if(event.keyCode === KEY.DOWN || event.keyCode === KEY.RIGHT) {
-                            dropdown_item = $(selected_dropdown_item).next();
+
+                            if ($(selected_dropdown_item).length == 0 && $(input).data("settings").scrollOffDropDown) {
+                              //select the first item:
+                              dropdown_item = $('.token-input-dropdown').find('li').first();
+                            } else {
+                              dropdown_item = $(selected_dropdown_item).next();
+                            }
                         } else {
-                            dropdown_item = $(selected_dropdown_item).prev();
+                            if ($(selected_dropdown_item).length == 0 && $(input).data("settings").scrollOffDropDown) {
+                              //select the last item:
+                              dropdown_item = $('.token-input-dropdown').find('li').last();
+                            } else {
+                              dropdown_item = $(selected_dropdown_item).prev();
+                            }
                         }
 
                         if(dropdown_item.length) {
                             select_dropdown_item(dropdown_item);
+                        } else if ($(input).data("settings").scrollOffDropDown) {
+                            deselect_dropdown_item($(selected_dropdown_item));
+                            if ($(input).data("settings").applySelectedValueToInputQuery) {
+                                input_box.val(last_query);
+                            }
                         }
                     }
                     return false;
@@ -314,7 +336,11 @@ $.TokenList = function (input, url_or_data, settings) {
                             delete_token($(selected_token));
                             hidden_input.change();
                         } else if(previous_token.length) {
+                          if ($(input).data("settings").allowSelectTokens) {
                             select_token($(previous_token.get(0)));
+                          } else {
+                            delete_token($(previous_token.get(0)));
+                          }
                         }
 
                         return false;
@@ -657,7 +683,7 @@ $.TokenList = function (input, url_or_data, settings) {
 
     // Select a token in the token list
     function select_token (token) {
-        if (!$(input).data("settings").disabled) {
+        if (!$(input).data("settings").disabled && $(input).data("settings").allowSelectTokens) {
             token.addClass($(input).data("settings").classes.selectedToken);
             selected_token = token.get(0);
 
@@ -761,14 +787,29 @@ $.TokenList = function (input, url_or_data, settings) {
     }
 
     function show_dropdown() {
+        var css_hash =
+          {
+              position: "absolute",
+              top: $(token_list).offset().top + $(token_list).height(),
+              left: $(token_list).offset().left,
+              width: $(token_list).width(),
+              'z-index': $(input).data("settings").zindex
+          };
+        if ($(input).data("settings").dropDownUnderToken) {
+            var lastChild = $(token_list).find('li').last();
+            css_hash =
+            {
+               //Must set a width in the css for token-input-dropdown
+               position: "absolute",
+               top: lastChild.offset().top + lastChild.height(),
+               left: lastChild.offset().left,
+               'z-index': $(input).data("settings").zindex
+            };
+        }
+
+
         dropdown
-            .css({
-                position: "absolute",
-                top: $(token_list).offset().top + $(token_list).height(),
-                left: $(token_list).offset().left,
-                width: $(token_list).width(),
-                'z-index': $(input).data("settings").zindex
-            })
+            .css(css_hash)
             .show();
     }
 
@@ -840,7 +881,8 @@ $.TokenList = function (input, url_or_data, settings) {
                     this_li.addClass($(input).data("settings").classes.dropdownItem2);
                 }
 
-                if(index === 0) {
+
+                if(index === 0 && $(input).data("settings").selectFirstResultAfterSearch) {
                     select_dropdown_item(this_li);
                 }
 
@@ -858,6 +900,9 @@ $.TokenList = function (input, url_or_data, settings) {
             if($(input).data("settings").noResultsText) {
                 dropdown.html("<p>" + escapeHTML($(input).data("settings").noResultsText) + "</p>");
                 show_dropdown();
+            } else {
+                //This ensures we don't continue to show old results if there are no new results.
+                hide_dropdown();
             }
         }
     }
@@ -871,6 +916,9 @@ $.TokenList = function (input, url_or_data, settings) {
 
             item.addClass($(input).data("settings").classes.selectedDropdownItem);
             selected_dropdown_item = item.get(0);
+            if ($(input).data("settings").applySelectedValueToInputQuery) {
+                input_box.val($(selected_dropdown_item).text());
+            }
         }
     }
 
@@ -886,6 +934,9 @@ $.TokenList = function (input, url_or_data, settings) {
         var query = input_box.val();
 
         if(query && query.length) {
+            if ($(input).data("settings").applySelectedValueToInputQuery) {
+                last_query = query;
+            }
             if(selected_token) {
                 deselect_token($(selected_token), POSITION.AFTER);
             }
